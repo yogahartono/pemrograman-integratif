@@ -1,151 +1,80 @@
 const grpc = require('grpc');
 const protoLoader = require('@grpc/proto-loader');
 
-const PROTO_PATH = __dirname + '/protos/crud.proto';
+const PROTO_PATH = './service.proto';
 
-const packageDefinition = protoLoader.loadSync(
-  PROTO_PATH,
-  { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true }
-  );
-  const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-  const client = new protoDescriptor.crud.CrudService(
-    'localhost:50051',
-    grpc.credentials.createInsecure()
-    );
+const packageDefinition = protoLoader.loadSync(PROTO_PATH);
+const userProto = grpc.loadPackageDefinition(packageDefinition).User;
 
-    // read
-    const read = (id, callback) => {
-      const request = { id };
-      client.Read(request, (error, response) => {
-        if (error) {
-          console.error(error.details);
-          return;
-        }
-        console.log(`User found: ${JSON.stringify(response)}`);
-        if (callback) callback();
-      });
-    };
+const client = new userProto.UserService('localhost:5000', grpc.credentials.createInsecure());
 
-    // create
-    const create = () => {
-  console.clear();
-  const request1 = { name: 'Alice Smith', age: 25, email: 'alice.smith@example.com' };
-  const request2 = { name: 'Bob Brown', age: 30, email: 'bob.brown@example.com' };
-  const request3 = { name: 'Charlie Green', age: 35, email: 'charlie.green@example.com' };
-  client.Create(request1, (error, response1) => {
-    if (error) {
-      console.error(error.details);
-      return;
-    }
-    console.log(`User created successfully with ID ${response1.id}`);
-    read(response1.id, () => {
-      client.Create(request2, (error, response2) => {
-        if (error) {
-          console.error(error.details);
-          return;
-        }
-        console.log(`User created successfully with ID ${response2.id}`);
-        read(response2.id, () => {
-          client.Create(request3, (error, response3) => {
-            if (error) {
-              console.error(error.details);
-              return;
-            }
-            console.log(`User created successfully with ID ${response3.id}`);
-            read(response3.id, () => {
-              list(() => {
-                update(response2.id, () => {
-                  remove(response2.id, () => {
-                    list();
-                  });
-                });
-              });
-            });
-          });
-        });
-      });
-    });
-  });
-};
-
-// delete
-const remove = (id, callback) => {
-  const request = { id };
-  client.Delete(request, (error, response) => {
-    if (error) {
-      console.error(error.details);
-      return;
-    }
-    console.log(`User deleted successfully: ${response.success}`);
-    if (callback) callback();
-  });
-};
-
-//list
-const list = (callback) => {
-  const request = {};
-  client.ListUsers(request, (error, response) => {
-    if (error) {
-      console.error(error.details);
-      return;
-    }
-    console.log(`Users found: ${JSON.stringify(response.users)}`);
-    if (callback) callback();
-  });
-};
-
-// update
-const update = (id, callback) => {
-  const request = { id };
-  client.Read(request, (error, response) => {
-    if (error) {
-      console.error(error.details);
-      return;
-    }
-    console.log(`User found: ${JSON.stringify(response)}`);
-    const updatedName = `updated ${response.name}`;
-    const updatedRequest = { id, name: updatedName, age: response.age, email: response.email };
-    client.Update(updatedRequest,(error, response) => {
+function getUser(userId) {
+  return new Promise((resolve, reject) => {
+    client.getUser({ userId }, (error, user) => {
       if (error) {
-        console.error(error.details);
-        return;
+        reject(error);
+      } else {
+        resolve(user);
       }
-      console.log(`User updated successfully: ${response.success}`);
-      if (callback) callback();
     });
   });
-};
+}
 
 
-  
-// const deleteAll = () => {
-//   const request = {};
-//   client.DeleteAll(request, (error, response) => {
-//     if (error) {
-//       console.error(error.details);
-//       return;
-//     }
-//     console.log(`All users deleted successfully: ${response.success}`);
-//   });
-// };
-
-// test
-// deleteAll();
-create();
-
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-setTimeout(() => {
-  // wait for create() to finish
-  list(() => {
-    read(2, () => {
-      update(2, () => {
-        read(2, () => {
-          remove(2, () => {
-            list();
-          });
-        });
-      });
+function addUser(name, age) {
+  return new Promise((resolve, reject) => {
+    const user = { name, age };
+    client.addUser(user, (error, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(response);
+      }
     });
   });
-}, 500); // wait for half a second before starting the test
+}
+
+function updateUser(userId, name, age) {
+  return new Promise((resolve, reject) => {
+    const user = { userId, name, age };
+    client.updateUser(user, (error, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+function deleteUser(userId) {
+  return new Promise((resolve, reject) => {
+    client.deleteUser({ userId }, (error, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+async function test() {
+  try {
+    const user = await getUser(1);
+    console.log('getUser:', user);
+
+    const newUser = await addUser('Yoga', 10);
+    console.log('addUser:', newUser);
+
+    const updatedUser = await updateUser(3, 'Cena', 29);
+    console.log('updateUser:', updatedUser);
+
+    const result = await deleteUser(6);
+    console.log('deleteUser:', result);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+test();
