@@ -1,123 +1,97 @@
 const grpc = require('grpc');
 const protoLoader = require('@grpc/proto-loader');
-const sqlite3 = require('sqlite3').verbose();
+const mysql = require('mysql2');
 
-// const db = new sqlite3.Database(':memory:');
-const db = new sqlite3.Database('database.db');
+const PROTO_PATH = './service.proto';
 
-const PROTO_PATH = __dirname + '/protos/crud.proto';
+const packageDefinition = protoLoader.loadSync(PROTO_PATH);
+const userProto = grpc.loadPackageDefinition(packageDefinition).User;
 
-const packageDefinition = protoLoader.loadSync(
-  PROTO_PATH,
-  { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true }
-);
-const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-
-const server = new grpc.Server();
-
-db.serialize(function() {
-    db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, age INTEGER, email TEXT)");
-
-  //Create
-  const create = (call, callback) => {
-    const { name, age, email } = call.request;
-    const query = `INSERT INTO users (name,age, email) VALUES ("${name}", ${age}, "${email}")`;
-    db.run(query, function(err) {
-      if (err) {
-        console.error(err);
-        callback({ code: grpc.status.INTERNAL, message: err.message });
-        return;
-      }
-      console.log(`User ${name} has been created with ID: ${this.lastID}`);
-      callback(null, { success: true, id: this.lastID || this.changes });
-    });
-  };
-  
-  // Read
-const read = (call, callback) => {
-  const id = call.request.id;
-  const query = `SELECT * FROM users WHERE id = ${id}`;
-  db.get(query, function(err, row) {
-    if (err) {
-      console.error(err);
-      callback({ code: grpc.status.INTERNAL, message: err.message });
-      return;
-    }
-    if (!row) {
-      callback({ code: grpc.status.NOT_FOUND, details: `User with ID ${id} not found` });
-      return;
-    }
-    const user = {
-      id: row.id,
-      name: row.name,
-      age: row.age,
-      email: row.email
-    };
-    callback(null, { user });
-  });
-};
-
-// Update
-const update = (call, callback) => {
-  const query = `UPDATE users SET name = 'updated ' || name`;
-  db.run(query, function(err) {
-    if (err) {
-      console.error(err);
-      callback({ code: grpc.status.INTERNAL, message: err.message });
-      return;
-    }
-    console.log(`All users have been updated`);
-    callback(null, { success: true });
-  });
-};
-  
-  //Delete
-  const remove = (call, callback) => {
-    const id = call.request.id;
-    const query = `DELETE FROM users WHERE id = ${id}`;
-    db.run(query, function(err) {
-      if (err) {
-        console.error(err);
-        callback({ code: grpc.status.INTERNAL, message: err.message });
-        return;
-      }
-      if (this.changes === 0) {
-        callback({ code: grpc.status.NOT_FOUND, details: `User with ID ${id} not found` });
-        return;
-      }
-      console.log(`User with ID ${id} has been deleted`);
-      callback(null, { success: true });
-    });
-  };
-
-  //List
-  const listUsers = (call, callback) => {
-    const query = `SELECT * FROM users`;
-    db.all(query, function(err, rows) {
-      if (err) {
-        console.error(err);
-        callback({ code: grpc.status.INTERNAL, message: err.message });
-        return;
-      }
-      const users = rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        age: row.age,
-        email: row.email,
-      }));
-      callback(null, { users });
-    });
-  };
-  
-  server.addService(protoDescriptor.crud.CrudService.service, {
-    Create: create,
-    Read: read,
-    Update: update,
-    Delete: remove,
-    ListUsers: listUsers,
-  });
-  
-  server.bind('localhost:50051', grpc.ServerCredentials.createInsecure());
-  console.log('Server running at http://localhost:50051');
-  server.start();
+const pool = mysql.createPool({
+  host: 'localhost',
+  user: 'root',
+  password: '',
+  database: 'grcp-pi',
+  waitForConnections: true,
+  connectionLimit: 10,
 });
+
+function getUser(call, callback) {
+  const userId = call.request.userId;
+  pool.query('SELECT * FROM users WHERE user_id = ?', [userId], (error, results) => {
+    if (error) {
+      console.error(error);
+      callback({ code: grpc.status.INTERNAL, message: 'Internal Server Error' });
+      return;
+    }
+    if (results.length === 0) {
+      callback({ code: grpc.status.NOT_FOUND, message: 'User not found' });
+      return;
+    }
+    const userData = results[0];
+    const user = {
+      userId: userData.user_id,
+      name: userData.name,
+      age: userData.age,
+    };
+    callback(null, user);
+  });
+}
+
+function addUser(call, callback) {
+  const name = call.request.name;
+  const age = call.request.age;
+  pool.query('INSERT INTO users (name, age) VALUES (?, ?)', [name, age], (error, result) => {
+    if (error) {
+      console.error(error);
+      callback({ code: grpc.status.INTERNAL, message: 'Internal Server Error' });
+      return;
+    }
+    const userId = result.insertId;
+    const user = { userId, name, age };
+    callback(null, user);
+  });
+}
+
+function updateUser(call, callback) {
+  const userId = call.request.userId;
+  const name = call.request.name;
+  const age = call.request.age;
+  pool.query('UPDATE users SET name = ?, age = ? WHERE user_id = ?', [name, age, userId], error => {
+    if (error) {
+      console.error(error);
+      callback({ code: grpc.status.INTERNAL, message: 'Internal Server Error' });
+      return;
+    }
+    const user = { userId, name, age };
+    callback(null, user);
+  });
+}
+
+function deleteUser(call, callback) {
+  const userId = call.request.userId;
+  pool.query('DELETE FROM users WHERE user_id = ?', [userId], error => {
+    if (error) {
+      console.error(error);
+      callback({ code: grpc.status.INTERNAL, message: 'Internal Server Error' });
+      return;
+    }
+    callback(null, {});
+  });
+}
+
+function main() {
+  const server = new grpc.Server();
+  server.addService(userProto.UserService.service, {
+    getUser,
+    addUser,
+    updateUser,
+    deleteUser,
+  });
+  server.bindAsync('127.0.0.1:5000', grpc.ServerCredentials.createInsecure(), () => {
+    console.log('Server running at http://127.0.0.1:5000');
+    server.start();
+  });
+}
+
+main();
